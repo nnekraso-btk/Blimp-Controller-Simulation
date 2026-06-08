@@ -1,0 +1,36 @@
+WHAT IS NEW IN THE CURRENT FILE vs BASELINE pre switch to 10m configuration for more accurate phase changes
+
+**AutoFollower controller restructure** :
+
+- Fixed behind-tail CLF target (removed sliding angular offset that caused outward spirals)
+- Arc correction force: tangential push back into the ±60° cone when B drifts outside it
+- kff_scale: Kff fades to zero proportionally as B enters the outer warning zone, preventing feedforward from braking inward recovery
+- Explicit heading PD with crab angle in psi_des rather than force projection; eliminates the stall from large F_lateral consuming all motor authority
+- Coriolis yaw feedforward Kff_yaw x beta_dot; pre-compensates nose wobble from disturbance steps rather than reacting after the fact
+- Mz cap in recovery zone: preserves minimum 60% surge authority when turning toward A
+- Comm-lost CLF target: B navigates to last known A position when comms fail
+
+**CBF filter constraint improvements** :
+
+- CLF converted from hard constraint to soft with slack variable delta_clf (penalty 80); prevents QP infeasibility during motor saturation
+- Uncontrolled Coriolis dynamics a_unc_dp in both barrier RHS; CBF accounts for physics it cannot control
+- Worst-case disturbance margin dist_margin_inner/outer in both barriers — pre-loads motor to fight potential disturbance
+- Broadside threat detection — CBF activates early when heading is within 60° of perpendicular to the radial and d > 5 m
+
+**Layered leader response** :
+
+Predictive leader speed scaling ldr_scale — projects B forward T2=1.0s under worst-case disturbance, scales A's force proportionally to predicted boundary proximity
+Layer 3 comm-lost full stop with last-known-A navigation for B
+
+**Visualization**:
+
+Cone visualization (h3 wedge, arc, cyan dot)
+Simplified bullet-shaped blimp markers at display scale
+
+WHAT REMAINS PENDING, added in 10m version
+- Randomized disturbance heading; currently only worst-case (full force in radially outward direction)
+- Blimp dimensions note: P.a = 0.55 in both files, should be 0.918 m per Table 6.2 from Sponaugle Thesis. For visual convenience only, no physics impact
+- Layer 3 timeout and recovery modes: HOLD is implemented but permanent. The pilot-selectable P.recovery_mode (HOLD / DEADRECKON / CONTINUE_REDUCED) and P.layer3_timeout parameter discussed but not yet coded.
+- Dead reckoning: B extrapolating A's position using last known velocity during comm loss — not yet implemented.
+- ldr_scale reliability: The velocity scaling sometimes fails to reduce A's speed in practice — this was observed but the root cause hasn't been fully resolved.
+- HUD display of h3: The cone barrier value and a CONE RELAXED status indicator are absent from the HUD panels.
