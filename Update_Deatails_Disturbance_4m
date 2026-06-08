@@ -27,7 +27,7 @@ Layer 3 comm-lost full stop with last-known-A navigation for B
 Cone visualization (h3 wedge, arc, cyan dot)
 Simplified bullet-shaped blimp markers at display scale
 
-WHAT REMAINS PENDING, added in 10m version
+WHAT REMAINS PENDING, added in 10m version, and backported to 4m once sufficiently demonstrated
 - Randomized disturbance heading; currently only worst-case (full force in radially outward direction)
 - Blimp dimensions note: P.a = 0.55 in both files, should be 0.918 m per Table 6.2 from Sponaugle Thesis. For visual convenience only, no physics impact
 - Layer 3 timeout and recovery modes: HOLD is implemented but permanent. The pilot-selectable P.recovery_mode (HOLD / DEADRECKON / CONTINUE_REDUCED) and P.layer3_timeout parameter discussed but not yet coded.
