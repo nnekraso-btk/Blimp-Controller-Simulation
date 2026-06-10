@@ -36,7 +36,7 @@ P.ly = 0.461;
 P.F_max  = 1.07;
 P.F_step = 0.40;
 P.F_vert = 0.55;
-P.a = 0.55;  P.b = 0.22;  P.c = 0.22;
+P.a = 0.918;  P.b = 0.372;  P.c = 0.372;
 
 % Comm zones
 % Zone distances scaled to WVU Vicon lab (~10m x 10m capture volume).
