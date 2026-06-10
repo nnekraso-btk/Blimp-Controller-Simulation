@@ -1,4 +1,4 @@
-function 10m_CLF_CBF_RNDM_Disturbance()
+function CLF_CBF_RNDM_Disturbance_10m()
 %% blimpFormation — Leader-Follower Formation Control
 %
 % Two modes, switch with M key:
