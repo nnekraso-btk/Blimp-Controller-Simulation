@@ -29,7 +29,7 @@ All parameters sourced from Sponaugle 2025, Tables 6.2, 6.3, 6.7.
 | Max thrust (Park 250 @ PWM 1800) | F_max = 1.07 N | Table 6.2 |
 | Semi-major axis | a = 0.918 m | Table 6.2 |
 
-> **Note:** `P.a = 0.55` in the current file for visual convenience. No physics impact. Correct value 0.918 m pending visual update.
+> **Note:** Semi-axes `P.a = 0.918 m`, `P.b = P.c = 0.372 m` per Table 6.2. Visual only — physics uses added-mass parameters directly.
 
 **Equations of motion** (body frame, state `[x, y, z, ψ, u, v, w, r]`):
 ```
@@ -208,7 +208,6 @@ The following were developed and validated in the 10 m version. Items marked †
 | `P.recovery_mode` | HOLD is permanent. CONTINUE_REDUCED and DEADRECKON pilot-selectable modes not yet coded |
 | Dead reckoning | B extrapolating A's future position using last known velocity — deferred pending design discussion of divergence risk and mission profile |
 | HUD h3 display | Cone barrier value and CONE RELAXED status indicator absent from system column |
-| `P.a` visual fix | Currently 0.55 m; should be 0.918 m per Table 6.2. Visual only, no physics impact |
 | 4 m backport | Items 1–7 above are scale-independent and should be applied to the 4 m configuration file |
 
 ---
