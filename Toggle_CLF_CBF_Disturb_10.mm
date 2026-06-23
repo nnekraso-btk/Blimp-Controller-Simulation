@@ -1,4 +1,4 @@
-function Pure_CLF_CBF_Disturb_10m()
+function CLF_CBF_10m()
 %% blimpFormation — Leader-Follower Formation Control
 %
 % Two modes, switch with M key:
@@ -61,7 +61,9 @@ P.cone_half_angle = pi/3;      % ±60° cone half-angle — h3 CBF boundary [rad
 P.cone_warn_frac  = 0.75;      % soft barrier activates at 75% of cone (45°)
 P.clf_p_cone      = 40.0;      % h3 slack penalty — lower than CLF so cone
                                % yields before convergence under motor limits
-P.clf_p_slack     = 80.0;      % CLF slack penalty (convergence, yields last)
+P.clf_p_slack     = 80.0;      % CLF slack penalty (used only when clf_hard = false)
+P.clf_hard        = false;      % true: hard CLF (no slack, CLF dropped on infeasibility)
+                                % false: soft CLF (slack variable with p_slack penalty)
 % Follower controller gains — retuned for world-frame inertia model
 %
 % Old model had zeta=0.30 (heavily underdamped — the floatiness).
@@ -126,9 +128,15 @@ P.cbf_h2_thresh        = 75.00;  % QP fires when d > 5.00m
 P.cbf_broadside_thresh = 0.50;   % activate when within ~60° of broadside
 P.cbf_broadside_d_min  = 5.00;   % [m] broadside check only when d > this
 
-% Hard CLF (no slack): no static obstacles in this problem, so the CLF must
-% drive convergence unconditionally. CLF/CBF conflicts are resolved by the
-% multi-stage fallback in clf_cbf_filter (drop CLF row, re-solve CBF-only).
+% CLF mode (P.clf_hard):
+%   true  — hard CLF: no slack variable; QP solves CLF as a strict constraint.
+%           If infeasible, the fallback drops the CLF row and re-solves CBF-only.
+%           Safety is preserved; convergence yields. Used for pure-CLF validation
+%           where convergence must be verifiably the CLF's work, not slack.
+%   false — soft CLF: slack variable δ_clf included with penalty p_slack. The QP
+%           can relax CLF satisfaction at high cost. Useful when CBF/CLF conflict
+%           is structural (e.g. head-on standoff) and graceful relaxation is
+%           preferable to abrupt CLF abandonment via the fallback.
 % If CLF causes QP infeasibility (motor saturation), falls back to CBF-only
 P.cbf_enabled = true;   % set false to disable filter and compare behaviour
 
@@ -146,7 +154,7 @@ P.dist_mag         = 0.40;  % simulation disturbance magnitude [N]
 % The CBF margin (dist_max_force) always uses the magnitude, not the sign,
 % so it pre-loads the motor against the actual applied force regardless
 % of which barrier is being tested.
-P.dist_direction   = 0;     % +1 outward, -1 inward, 0 = randomized each cycle
+P.dist_direction   = 1;     % +1 outward, -1 inward, 0 = randomized each cycle
 % When dist_direction=0, a random unit vector is drawn once per ON cycle
 % and held constant for that cycle's duration — matching a real gust that
 % has a fixed direction during its event rather than changing each tick.
@@ -205,7 +213,7 @@ CYN2= [0.05 0.55 0.70];
 %% ═══════════════════════════════════════════════════════════
 %% FIGURE + AXES
 %% ═══════════════════════════════════════════════════════════
-fig = figure('Name','CLF-CBF-QP Control at 10m Config', ...
+fig = figure('Name','WVU Airship — Formation Control', ...
     'NumberTitle','off','Color',BG,'Position',[40 40 1280 720], ...
     'KeyPressFcn',@onKeyDown,'KeyReleaseFcn',@onKeyUp, ...
     'CloseRequestFcn',@onClose,'Toolbar','none','Menubar','none');
@@ -1451,12 +1459,17 @@ end
 % A third constraint, the CLF, ensures B is always actively converging toward
 % the formation position rather than just hovering near the boundary.
 %
-% The CLF is hard (no slack variable). Convergence to the formation point is
-% required unconditionally — when the CBF constraints conflict with strict
-% CLF satisfaction, the QP becomes infeasible and the fallback drops the CLF
-% row to re-solve CBF-only, guaranteeing safety even when convergence yields.
-% This isolates the CLF's contribution during validation: any convergence
-% behaviour observed is the CLF working as designed, not slack triggering.
+% The CLF mode is controlled by P.clf_hard (set in the parameters block).
+% In hard mode (default): no slack variable; CLF is enforced as a strict
+%   constraint. If infeasible, the fallback drops the CLF row and re-solves
+%   CBF-only — safety takes priority, convergence yields. This isolates the
+%   CLF's contribution during validation: any convergence behaviour observed
+%   is the CLF working as designed, not slack triggering.
+% In soft mode: a slack variable δ_clf with penalty p_slack permits the QP
+%   to relax CLF satisfaction at high cost when CBF constraints conflict.
+%   The mode is retained as a configurable alternative for cases where the
+%   CBF/CLF conflict is structural (e.g. head-on standoff), enabling graceful
+%   relaxation rather than abrupt CLF abandonment via the fallback.
 %
 % Requires the MATLAB Optimization Toolbox. If unavailable, forces pass
 % through unchanged and the HUD shows NO TOOLBOX.
@@ -1581,17 +1594,20 @@ function [Fx_s, Fy_s, info] = clf_cbf_filter(Fx_nom, Fy_nom, S, L, des_xy, P, h3
     % Extra tightening on outer barrier proportional to tangential escape velocity
     tangential_penalty = 0.5 * v_tangential_sq;
 
-    % ── QP setup: 2 variables [ax, ay] — hard CLF, no slack ─────────────────
-    % CLF is enforced as a hard constraint. There are no static obstacles in
-    % this problem, so the CLF should drive convergence unconditionally; any
-    % CLF/CBF conflict is resolved by the multi-stage fallback below (the QP
-    % becomes infeasible, then drops the CLF row and re-solves CBF-only).
-    % This isolates the CLF's contribution in validation: convergence is
-    % verifiably the CLF's work, not slack triggering.
+    % ── QP setup: 2 or 3 variables depending on P.clf_hard ───────────────────
+    % Hard mode (clf_hard=true): variables [ax, ay]. CLF is a strict constraint.
+    %   If infeasible, fallback drops CLF row and re-solves CBF-only.
+    % Soft mode (clf_hard=false): variables [ax, ay, delta_clf]. CLF can be
+    %   relaxed at cost p_slack·δ², penalising violation rather than failing.
     ax_nom = Fx_nom / m;
     ay_nom = Fy_nom / m;
-    H_qp = 2 * eye(2);
-    f_qp = [-2*ax_nom; -2*ay_nom];
+    if P.clf_hard
+        H_qp = 2 * eye(2);
+        f_qp = [-2*ax_nom; -2*ay_nom];
+    else
+        H_qp = 2 * diag([1, 1, P.clf_p_slack]);
+        f_qp = [-2*ax_nom; -2*ay_nom; 0];
+    end
 
     % h3 cone: computed for display/monitoring only — not in QP constraints
     d_ab_safe = max(sqrt(d_sq), 0.01);
@@ -1654,19 +1670,30 @@ function [Fx_s, Fy_s, info] = clf_cbf_filter(Fx_nom, Fy_nom, S, L, des_xy, P, h3
          + (P.cbf_beta1+P.cbf_beta2)*h2_dot ...
          + P.cbf_beta1*P.cbf_beta2*h2;
 
-    % CLF — hard constraint, no slack
+    % CLF row
     rhs_clf = -(2*ev_sq ...
          + (P.clf_gamma1+P.clf_gamma2)*V_dot ...
          + P.clf_gamma1*P.clf_gamma2*V);
 
-    % Constraint matrix [ax, ay] — three hard inequality rows
     a_max  = P.F_max / m;
-    A_ineq = [-2*dx,   -2*dy;   % h1 inner barrier
-               2*dx,    2*dy;   % h2 outer barrier
-               2*epx,   2*epy]; % CLF (hard)
-    b_ineq = [rhs1; rhs2; rhs_clf];
-    lb = [-a_max; -a_max];
-    ub = [ a_max;  a_max];
+    if P.clf_hard
+        % Hard CLF: 2-variable QP, CLF as strict constraint
+        A_ineq = [-2*dx,   -2*dy;   % h1 inner barrier
+                   2*dx,    2*dy;   % h2 outer barrier
+                   2*epx,   2*epy]; % CLF (hard)
+        b_ineq = [rhs1; rhs2; rhs_clf];
+        lb = [-a_max; -a_max];
+        ub = [ a_max;  a_max];
+    else
+        % Soft CLF: 3-variable QP with slack column and slack >= 0 row
+        A_ineq = [-2*dx,   -2*dy,   0;   % h1 inner barrier
+                   2*dx,    2*dy,   0;   % h2 outer barrier
+                   2*epx,   2*epy, -1;   % CLF (soft via delta_clf)
+                   0,        0,    -1];  % delta_clf >= 0
+        b_ineq = [rhs1; rhs2; rhs_clf; 0];
+        lb = [-a_max; -a_max; 0];
+        ub = [ a_max;  a_max; 1e6];
+    end
 
     % Solve. Warm-start from nominal — usually only a small correction needed.
     % Perturb z0 slightly inside motor bounds — prevents active-set from
@@ -1674,7 +1701,11 @@ function [Fx_s, Fy_s, info] = clf_cbf_filter(Fx_nom, Fy_nom, S, L, des_xy, P, h3
     % ax_nom is exactly at the motor limit.
     ax0 = max(lb(1)+0.01, min(ub(1)-0.01, ax_nom));
     ay0 = max(lb(2)+0.01, min(ub(2)-0.01, ay_nom));
-    z0   = [ax0; ay0];
+    if P.clf_hard
+        z0 = [ax0; ay0];
+    else
+        z0 = [ax0; ay0; 0];
+    end
     % active-set handles bound-active problems correctly.
     % MaxIterations caps compute to prevent simulation stall at 25ms tick.
     opts = optimoptions('quadprog','Display','off', ...
@@ -1688,15 +1719,28 @@ function [Fx_s, Fy_s, info] = clf_cbf_filter(Fx_nom, Fy_nom, S, L, des_xy, P, h3
                                         [], [], lb, ub, z0, opts);
         if exitflag == 1
             ax_s = z_sol(1); ay_s = z_sol(2);
+            if ~P.clf_hard
+                clf_slack_val = z_sol(3);
+            end
             cbf_active = norm([ax_s-ax_nom, ay_s-ay_nom]) > 0.05;
             if cbf_active, qp_status = 'QP ACTIVE'; end
         else
-            % Hard CLF infeasible — drop CLF row, re-solve with CBF only.
-            % This is the "safety takes priority" fallback: B may not converge
-            % to formation in this tick, but the barriers remain inviolable.
+            % QP infeasible. In hard mode, drop the CLF row and re-solve with
+            % CBF only — safety takes priority, convergence yields. In soft
+            % mode the slack should normally prevent this branch, but the
+            % fallback is kept as a safety net for pathological geometries.
+            if P.clf_hard
+                A_cbf = A_ineq(1:2,:);
+                b_cbf = b_ineq(1:2);
+                lb_cbf = lb; ub_cbf = ub; z0_cbf = z0;
+            else
+                A_cbf = A_ineq(1:2,1:2);
+                b_cbf = b_ineq(1:2);
+                lb_cbf = lb(1:2); ub_cbf = ub(1:2); z0_cbf = z0(1:2);
+            end
             [z_sol2, ~, exitflag2] = quadprog( ...
-                H_qp, f_qp, ...
-                A_ineq(1:2,:), b_ineq(1:2), [], [], lb, ub, z0, opts);
+                2*eye(2), [-2*ax_nom;-2*ay_nom], ...
+                A_cbf, b_cbf, [], [], lb_cbf, ub_cbf, z0_cbf, opts);
             if exitflag2 == 1
                 ax_s = z_sol2(1); ay_s = z_sol2(2);
                 cbf_active = true; qp_status = 'CBF ONLY';
